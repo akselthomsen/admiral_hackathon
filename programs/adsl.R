@@ -38,6 +38,9 @@ dm <- haven::read_xpt("sdtm/dm.xpt") |>
 suppdm <- haven::read_xpt("sdtm/suppdm.xpt") |>
   mutate(across(where(is.character), ~ na_if(.x, "")))
 
+vs <- haven::read_xpt("sdtm/vs.xpt") |>
+  mutate(across(where(is.character), ~ na_if(.x, "")))
+
 # Build ADSL ----
 
 ## Generic using metacore ----
@@ -48,13 +51,27 @@ adsl_0 <- meta |>
     predecessor_only = FALSE,
     keep = FALSE)
 
-## Add additional variables ----
+## Create needed sub data.frames for using the codelists ----
 
 armn <- codelist |>
   filter(code_id == "ARMN") |>
   pluck("codes", 1) |>
   mutate(TRT01P = decode,
-         TRT01A = decode)
+         TRT01A = decode,
+         code = as.numeric(code))
+
+agegr1n <- codelist |>
+  filter(code_id == "AGEGR1N") |>
+  pluck("codes", 1) |>
+  mutate(AGEGR1N = as.numeric(code))
+
+race <- codelist |>
+  filter(code_id == "RACE") |>
+  pluck("codes", 1) |>
+  mutate(RACE = code,
+         decode = as.numeric(decode))
+
+## Add additional variables ----
 
 adsl_1 <- adsl_0 |>
   derive_vars_merged(dataset_add = dm,
@@ -62,22 +79,48 @@ adsl_1 <- adsl_0 |>
                      new_vars = vars(ARM)) |>
   derive_vars_dt(new_vars_prefix = "RFST", dtc = RFSTDTC) |>
   derive_vars_dt(new_vars_prefix = "RFEN", dtc = RFENDTC) |>
-  mutate(TRT01A = TRT01P,
-         SITEGR1 = "900") |>
   derive_vars_merged(dataset_add = armn,
                      by_vars = vars(TRT01P),
                      new_vars = vars(TRT01PN = code)) |>
-  derive_vars_merged(dataset_add = armn,
-                     by_vars = vars(TRT01A),
-                     new_vars = vars(TRT01PA = code))
+  mutate(
+    TRT01A = TRT01P,
+    TRT01AN = TRT01PN,
+    SITEGR1 = "900",
+    AGEGR1N = case_when(AGE < 65 ~ 1,
+                        AGE > 80 ~ 3,
+                        TRUE ~ 2),
+    ) |>
+  derive_vars_merged(dataset_add = agegr1n,
+                     by_vars = vars(AGEGR1N),
+                     new_vars = vars(AGEGR1 = decode)) |>
+  derive_vars_merged(dataset_add = race,
+                     by_vars = vars(RACE),
+                     new_vars = vars(RACEN = decode)) |>
+  derive_vars_merged(dataset_add = vs,
+                     by_vars = vars(USUBJID),
+                     new_vars = vars(HEIGHTBL = VSSTRESN),
+                     filter_add = VSTESTCD == "HEIGHT" & VISITNUM == 1) |>
+  derive_vars_merged(dataset_add = vs,
+                     by_vars = vars(USUBJID),
+                     new_vars = vars(WEIGHTBL = VSSTRESN),
+                     filter_add = VSTESTCD == "WEIGHT" & VISITNUM == 3) |>
+  mutate(
+    BMIBL = WEIGHTBL / (HEIGHTBL/100)**2,
+    BMIBLGR1 = case_when(BMIBL < 25 ~ "<25",
+                         BMIBL >= 30 ~ ">=30",
+                         !is.na(BMIBL) ~ "25-<30")
+    )
 
+## Check progress ----
 
+summary(adsl_1)
 
-adsl_1
+meta$var_spec$variable |>
+  setdiff(names(adsl_1)) |>
+  sort()
 
-adsl_1 |>
-  is.na() |>
-  summary()
+# Export to XPT ----
+
 
 
 
