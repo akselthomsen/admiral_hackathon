@@ -33,10 +33,10 @@ meta <- metacore(ds_spec, ds_vars, var_spec, value_spec, deriviation, codelist) 
 # Read SDTM ----
 
 dm <- haven::read_xpt("sdtm/dm.xpt") |>
-  na_if("")
+  mutate(across(where(is.character), ~ na_if(.x, "")))
 
 suppdm <- haven::read_xpt("sdtm/suppdm.xpt") |>
-  na_if("")
+  mutate(across(where(is.character), ~ na_if(.x, "")))
 
 # Build ADSL ----
 
@@ -50,6 +50,12 @@ adsl_0 <- meta |>
 
 ## Add additional variables ----
 
+armn <- codelist |>
+  filter(code_id == "ARMN") |>
+  pluck("codes", 1) |>
+  mutate(TRT01P = decode,
+         TRT01A = decode)
+
 adsl_1 <- adsl_0 |>
   derive_vars_merged(dataset_add = dm,
                      by_vars = vars(USUBJID),
@@ -58,7 +64,12 @@ adsl_1 <- adsl_0 |>
   derive_vars_dt(new_vars_prefix = "RFEN", dtc = RFENDTC) |>
   mutate(TRT01A = TRT01P,
          SITEGR1 = "900") |>
-  derive_vars_merged(dataset_add = meta$codelist)
+  derive_vars_merged(dataset_add = armn,
+                     by_vars = vars(TRT01P),
+                     new_vars = vars(TRT01PN = code)) |>
+  derive_vars_merged(dataset_add = armn,
+                     by_vars = vars(TRT01A),
+                     new_vars = vars(TRT01PA = code))
 
 
 
@@ -68,9 +79,6 @@ adsl_1 |>
   is.na() |>
   summary()
 
-meta$ds_vars$variable |>
-  setdiff(names(adsl_1))
 
-adsl_1 |>
-  select(any_of(meta$ds_vars$variable))
+
 
