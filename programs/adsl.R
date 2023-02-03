@@ -41,6 +41,18 @@ suppdm <- haven::read_xpt("sdtm/suppdm.xpt") |>
 vs <- haven::read_xpt("sdtm/vs.xpt") |>
   mutate(across(where(is.character), ~ na_if(.x, "")))
 
+sc <- haven::read_xpt("sdtm/sc.xpt") |>
+  mutate(across(where(is.character), ~ na_if(.x, "")))
+
+ds <- haven::read_xpt("sdtm/ds.xpt") |>
+  mutate(across(where(is.character), ~ na_if(.x, "")))
+
+sv <- haven::read_xpt("sdtm/sv.xpt") |>
+  mutate(across(where(is.character), ~ na_if(.x, "")))
+
+mh <- haven::read_xpt("sdtm/mh.xpt") |>
+  mutate(across(where(is.character), ~ na_if(.x, "")))
+
 # Build ADSL ----
 
 ## Generic using metacore ----
@@ -51,7 +63,7 @@ adsl_0 <- meta |>
     predecessor_only = FALSE,
     keep = FALSE)
 
-## Create needed sub data.frames for using the codelists ----
+## Create needed sub data.frames for using the code lists etc. ----
 
 armn <- codelist |>
   filter(code_id == "ARMN") |>
@@ -71,17 +83,29 @@ race <- codelist |>
   mutate(RACE = code,
          decode = as.numeric(decode))
 
+dm_flags <- suppdm |>
+  filter(str_detect(QNAM, "COMPLT") |
+           QNAM %in% c("EFFICACY", "SAFETY", "ITT")) |>
+  select(USUBJID, QNAM, QVAL) |>
+  mutate(QNAM = case_when(str_detect(QNAM, "COMPLT") ~ str_remove(QNAM, "LT"),
+                          TRUE ~ str_sub(QNAM, 1, 3)) |>
+           paste0("FL")) |>
+  pivot_wider(names_from = QNAM, values_from = QVAL)
+
 ## Add additional variables ----
 
 adsl_1 <- adsl_0 |>
+  ### Derive ARM variables ----
   derive_vars_merged(dataset_add = dm,
                      by_vars = vars(USUBJID),
                      new_vars = vars(ARM)) |>
-  derive_vars_dt(new_vars_prefix = "RFST", dtc = RFSTDTC) |>
-  derive_vars_dt(new_vars_prefix = "RFEN", dtc = RFENDTC) |>
   derive_vars_merged(dataset_add = armn,
                      by_vars = vars(TRT01P),
                      new_vars = vars(TRT01PN = code)) |>
+  ### Derive date variables ----
+  derive_vars_dt(new_vars_prefix = "RFST", dtc = RFSTDTC) |>
+  derive_vars_dt(new_vars_prefix = "RFEN", dtc = RFENDTC) |>
+  ### Derive TRT variables and demographics  ----
   mutate(
     TRT01A = TRT01P,
     TRT01AN = TRT01PN,
@@ -96,6 +120,11 @@ adsl_1 <- adsl_0 |>
   derive_vars_merged(dataset_add = race,
                      by_vars = vars(RACE),
                      new_vars = vars(RACEN = decode)) |>
+  derive_vars_merged(dataset_add = sc,
+                     by_vars = vars(USUBJID),
+                     new_vars = vars(EDUCLVL = SCSTRESN),
+                     filter_add = SCTESTCD == "EDLEVEL") |>
+  ### Derive baseline ----
   derive_vars_merged(dataset_add = vs,
                      by_vars = vars(USUBJID),
                      new_vars = vars(HEIGHTBL = VSSTRESN),
@@ -103,17 +132,43 @@ adsl_1 <- adsl_0 |>
   derive_vars_merged(dataset_add = vs,
                      by_vars = vars(USUBJID),
                      new_vars = vars(WEIGHTBL = VSSTRESN),
-                     filter_add = VSTESTCD == "WEIGHT" & VISITNUM == 3) |>
+                     order = vars(VISITNUM),
+                     mode = "last",
+                     filter_add = VSTESTCD == "WEIGHT" & VISITNUM <= 3) |>
   mutate(
     BMIBL = WEIGHTBL / (HEIGHTBL/100)**2,
     BMIBLGR1 = case_when(BMIBL < 25 ~ "<25",
                          BMIBL >= 30 ~ ">=30",
                          !is.na(BMIBL) ~ "25-<30")
-    )
+    ) |>
+  ### Derive population flags ----
+  left_join(dm_flags, by = "USUBJID") |>
+  mutate(across(names(dm_flags), ~ coalesce(.x, "N"))) |>
+  ### Derive disposition variables ----
+  derive_vars_merged(dataset_add = ds,
+                     by_vars = vars(USUBJID),
+                     new_vars = vars(DCDECOD = DSDECOD),
+                     filter_add = DSCAT == "DISPOSITION EVENT") |>
+  ### Derive dates of different timings ----
+  derive_vars_merged(dataset_add = sv,
+                     by_vars = vars(USUBJID),
+                     new_vars = vars(VISIT1DT = SVSTDTC),
+                     filter_add = VISITNUM == 1) |>
+  derive_vars_merged(dataset_add = sv,
+                     by_vars = vars(USUBJID),
+                     new_vars = vars(TRTSDT = SVSTDTC),
+                     filter_add = VISITNUM == 3) |>
+  derive_vars_merged(dataset_add = mh,
+                     by_vars = vars(USUBJID),
+                     new_vars = vars(DISONSDT = MHSTDTC),
+                     filter_add = MHCAT == "PRIMARY DIAGNOSIS") |>
+  mutate(across(c(VISIT1DT,TRTSDT,DISONSDT), convert_dtc_to_dt))
 
 ## Check progress ----
 
 summary(adsl_1)
+
+summary(is.na(adsl_1))
 
 meta$var_spec$variable |>
   setdiff(names(adsl_1)) |>
