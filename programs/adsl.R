@@ -113,7 +113,7 @@ adsl_1 <- adsl_0 |>
                      by_vars = vars(TRT01P),
                      new_vars = vars(TRT01PN = code)) |>
   ### Derive date variables ----
-  derive_vars_dt(new_vars_prefix = "RFST", dtc = RFSTDTC) |>
+  # derive_vars_dt(new_vars_prefix = "RFST", dtc = RFSTDTC) |>
   derive_vars_dt(new_vars_prefix = "RFEN", dtc = RFENDTC) |>
   ### Derive TRT variables and demographics  ----
   mutate(
@@ -159,6 +159,11 @@ adsl_1 <- adsl_0 |>
                      by_vars = vars(USUBJID),
                      new_vars = vars(DCDECOD = DSDECOD),
                      filter_add = DSCAT == "DISPOSITION EVENT") |>
+  mutate(
+    DCSREAS = str_to_title(DCDECOD),
+    DISCONFL = if_else(DCDECOD == "COMPLETED", NA_character_, "Y"),
+    DSRAEFL = if_else(DCDECOD == "ADVERSE EVENT", "Y", NA_character_)
+    ) |>
   ### Derive dates of different timings ----
   derive_vars_merged(dataset_add = sv,
                      by_vars = vars(USUBJID),
@@ -179,6 +184,13 @@ adsl_1 <- adsl_0 |>
                      mode = "last") |>
   mutate(across(c(VISIT1DT, TRTSDT, DISONSDT, TRTEDT), convert_dtc_to_dt)) |>
   derive_vars_duration(new_var = TRTDURD, start_date = TRTSDT, end_date = TRTEDT) |>
+  derive_vars_duration(new_var = DURDIS,
+                       start_date = VISIT1DT,
+                       end_date = DISONSDT,
+                       out_unit = "months") |>
+  mutate(DURDSGR1 = case_when(DURDIS >= 12 ~ ">=12",
+                              !is.na(DURDIS) ~ "<12")) |>
+  ### Summary stats from SDTM ----
   derive_var_merged_summary(dataset_add = qs,
                             by_vars = vars(USUBJID),
                             new_var = MMSETOT,
