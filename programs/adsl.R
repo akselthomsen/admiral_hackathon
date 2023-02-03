@@ -210,8 +210,3 @@ adsl_2 <- adsl_1 |>
   xportr_df_label(meta)
 
 xportr_write(adsl_2, "adam/adsl.xpt")
-
-
-
-
-
