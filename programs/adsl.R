@@ -1,6 +1,7 @@
 library(admiral)
 library(metacore)
 library(metatools)
+library(xportr)
 library(tidyverse)
 
 # Read and prepare metadata ----
@@ -32,6 +33,9 @@ meta <- metacore(ds_spec, ds_vars, var_spec, value_spec, deriviation, codelist) 
 
 # Read SDTM ----
 
+list(dm = "sdtm/dm.xpt", suppdm = "sdtm/suppdm.xpt") |>
+  map(haven::read_xpt)
+
 dm <- haven::read_xpt("sdtm/dm.xpt") |>
   mutate(across(where(is.character), ~ na_if(.x, "")))
 
@@ -51,6 +55,12 @@ sv <- haven::read_xpt("sdtm/sv.xpt") |>
   mutate(across(where(is.character), ~ na_if(.x, "")))
 
 mh <- haven::read_xpt("sdtm/mh.xpt") |>
+  mutate(across(where(is.character), ~ na_if(.x, "")))
+
+ex <- haven::read_xpt("sdtm/ex.xpt") |>
+  mutate(across(where(is.character), ~ na_if(.x, "")))
+
+qs <- haven::read_xpt("sdtm/qs.xpt") |>
   mutate(across(where(is.character), ~ na_if(.x, "")))
 
 # Build ADSL ----
@@ -162,9 +172,23 @@ adsl_1 <- adsl_0 |>
                      by_vars = vars(USUBJID),
                      new_vars = vars(DISONSDT = MHSTDTC),
                      filter_add = MHCAT == "PRIMARY DIAGNOSIS") |>
-  mutate(across(c(VISIT1DT,TRTSDT,DISONSDT), convert_dtc_to_dt))
+  derive_vars_merged(dataset_add = ex,
+                     by_vars = vars(USUBJID),
+                     new_vars = vars(TRTEDT = EXENDTC),
+                     order = vars(VISITNUM),
+                     mode = "last") |>
+  mutate(across(c(VISIT1DT, TRTSDT, DISONSDT, TRTEDT), convert_dtc_to_dt)) |>
+  derive_vars_duration(new_var = TRTDURD, start_date = TRTSDT, end_date = TRTEDT) |>
+  derive_var_merged_summary(dataset_add = qs,
+                            by_vars = vars(USUBJID),
+                            new_var = MMSETOT,
+                            filter_add = QSCAT == "MINI-MENTAL STATE",
+                            analysis_var = QSSTRESN,
+                            summary_fun = sum)
 
 ## Check progress ----
+
+adsl_1
 
 summary(adsl_1)
 
@@ -174,7 +198,18 @@ meta$var_spec$variable |>
   setdiff(names(adsl_1)) |>
   sort()
 
-# Export to XPT ----
+# Check data and export to XPT ----
+
+adsl_2 <- adsl_1 |>
+  check_variables(meta) |>
+  check_ct_data(meta) |>
+  sort_by_key(meta) |>
+  xportr_type(meta) |>
+  xportr_length(meta) |>
+  xportr_label(meta) |>
+  xportr_df_label(meta)
+
+xportr_write(adsl_2, "adam/adsl.xpt")
 
 
 
