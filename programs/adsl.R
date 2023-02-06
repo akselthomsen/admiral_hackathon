@@ -15,7 +15,11 @@ ds_vars <- specs |>
   spec_type_to_ds_vars(key_seq_sep_sheet = FALSE)
 
 var_spec <- specs |>
-  spec_type_to_var_spec()
+  spec_type_to_var_spec() |>
+  mutate(type = case_when(type == "float" ~ "numeric",
+                          type == "text" ~ "character",
+                          TRUE ~ type)
+         )
 
 value_spec <- specs |>
   spec_type_to_value_spec(where_sep_sheet = FALSE)
@@ -81,6 +85,8 @@ dm_flags <- sdtm$suppdm |>
 ## Add additional variables ----
 
 adsl_1 <- adsl_0 |>
+  ### Remove screen failures ----
+  filter(TRT01P != "Screen Failure") |>
   ### Derive ARM variables ----
   derive_vars_merged(dataset_add = sdtm$dm,
                      by_vars = vars(USUBJID),
@@ -89,7 +95,6 @@ adsl_1 <- adsl_0 |>
                      by_vars = vars(TRT01P),
                      new_vars = vars(TRT01PN = code)) |>
   ### Derive date variables ----
-  # derive_vars_dt(new_vars_prefix = "RFST", dtc = RFSTDTC) |>
   derive_vars_dt(new_vars_prefix = "RFEN", dtc = RFENDTC) |>
   ### Derive TRT variables and demographics  ----
   mutate(
@@ -135,10 +140,20 @@ adsl_1 <- adsl_0 |>
                      by_vars = vars(USUBJID),
                      new_vars = vars(DCDECOD = DSDECOD),
                      filter_add = DSCAT == "DISPOSITION EVENT") |>
+  derive_vars_merged(dataset_add = sdtm$ds,
+                     by_vars = vars(USUBJID),
+                     new_vars = vars(VISNUMEN = VISITNUM),
+                     filter_add = DSTERM == "PROTOCOL COMPLETED") |>
   mutate(
-    DCSREAS = str_to_title(DCDECOD),
+    DCSREAS = case_when(DCDECOD == "WITHDRAWAL BY SUBJECT" ~ "Withdrew Consent",
+                        DCDECOD == "LOST TO FOLLOW-UP" ~ "Lost to Follow-up",
+                        DCDECOD == "LACK OF EFFICACY" ~ "Lack of Efficacy",
+                        DCDECOD == "STUDY TERMINATED BY SPONSOR" ~ "Sponsor Decision",
+                        TRUE ~ str_to_title(DCDECOD)),
     DISCONFL = if_else(DCDECOD == "COMPLETED", NA_character_, "Y"),
-    DSRAEFL = if_else(DCDECOD == "ADVERSE EVENT", "Y", NA_character_)
+    DSRAEFL = if_else(DCDECOD == "ADVERSE EVENT", "Y", NA_character_),
+    EOSSTT = if_else(DCDECOD == "COMPLETED", "COMPLETED", "DISCONTINUED"),
+    VISNUMEN = if_else(VISNUMEN == 13, 12, VISNUMEN)
     ) |>
   ### Derive dates of different timings ----
   derive_vars_merged(dataset_add = sdtm$sv,
@@ -172,7 +187,14 @@ adsl_1 <- adsl_0 |>
                             new_var = MMSETOT,
                             filter_add = QSCAT == "MINI-MENTAL STATE",
                             analysis_var = QSSTRESN,
-                            summary_fun = sum)
+                            summary_fun = sum) |>
+  ### Derive dosing ----
+  derive_var_merged_summary(dataset_add = sdtm$ex,
+                            by_vars = vars(USUBJID),
+                            new_var = CUMDOSE,
+                            analysis_var = EXDOSE,
+                            summary_fun = sum) |>
+  mutate(AVGDD = CUMDOSE/TRTDURD)
 
 ## Check progress ----
 
@@ -187,14 +209,17 @@ meta$var_spec$variable |>
   sort()
 
 # Check data and export to XPT ----
+# Note: xportr functions does not support the native pipe, due to faulty tidy evaluation of the .df argument.
+#       domain also has to be specied for this reason even if meta is subset to one data set.
 
 adsl_2 <- adsl_1 |>
   check_variables(meta) |>
   check_ct_data(meta) |>
-  sort_by_key(meta) |>
-  xportr_type(meta) |>
-  xportr_length(meta) |>
-  xportr_label(meta) |>
-  xportr_df_label(meta)
+  sort_by_key(meta) %>%
+  xportr_type(meta, domain = "ADSL") %>%
+  xportr_length(meta, domain = "ADSL") %>%
+  xportr_label(meta, domain = "ADSL") %>%
+  xportr_df_label(meta, domain = "ADSL") |>
+  convert_na_to_blanks()
 
 xportr_write(adsl_2, "adam/adsl.xpt")
