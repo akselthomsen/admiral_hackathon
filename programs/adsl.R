@@ -22,6 +22,7 @@ var_spec <- specs |>
   spec_type_to_var_spec() |>
   mutate(type = case_when(type == "float" ~ "numeric",
                           type == "text" ~ "character",
+                          str_detect(variable, "DT$") ~ "Date",
                           TRUE ~ type)
          )
 
@@ -86,7 +87,7 @@ dm_flags <- sdtm$suppdm |>
            paste0("FL")) |>
   pivot_wider(names_from = QNAM, values_from = QVAL)
 
-sitegr1 <- adsl_1 |>
+sitegr1 <- adsl_0 |>
   count(SITEID) |>
   mutate(SITEGR1 = if_else(n < 9, "900", SITEID))
 
@@ -234,5 +235,7 @@ adsl_2 <- adsl_1 |>
   xportr_label(meta, domain = "ADSL") %>%
   xportr_df_label(meta, domain = "ADSL") |>
   convert_na_to_blanks()
+
+adsl_2 |> select(ends_with("DT"))
 
 xportr_write(adsl_2, "adam/adsl.xpt")
