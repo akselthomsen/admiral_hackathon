@@ -86,6 +86,10 @@ dm_flags <- sdtm$suppdm |>
            paste0("FL")) |>
   pivot_wider(names_from = QNAM, values_from = QVAL)
 
+sitegr1 <- adsl_1 |>
+  count(SITEID) |>
+  mutate(SITEGR1 = if_else(n < 9, "900", SITEID))
+
 ## Add additional variables ----
 
 adsl_1 <- adsl_0 |>
@@ -104,11 +108,13 @@ adsl_1 <- adsl_0 |>
   mutate(
     TRT01A = TRT01P,
     TRT01AN = TRT01PN,
-    SITEGR1 = str_sub(string = USUBJID, start = 4, end = 6),
     AGEGR1N = case_when(AGE < 65 ~ 1,
                         AGE > 80 ~ 3,
                         TRUE ~ 2),
     ) |>
+  derive_vars_merged(dataset_add = sitegr1,
+                     by_vars = vars(SITEID),
+                     new_vars = vars(SITEGR1 = SITEGR1)) |>
   derive_vars_merged(dataset_add = agegr1n,
                      by_vars = vars(AGEGR1N),
                      new_vars = vars(AGEGR1 = decode)) |>
@@ -134,9 +140,7 @@ adsl_1 <- adsl_0 |>
     BMIBL = WEIGHTBL / (HEIGHTBL/100)**2,
     BMIBLGR1 = case_when(BMIBL < 25 ~ "<25",
                          BMIBL >= 30 ~ ">=30",
-                         !is.na(BMIBL) ~ "25-<30"),
-    across(ends_with("BL"), ~ round(.x, 1))
-    ) |>
+                         !is.na(BMIBL) ~ "25-<30")) |>
   ### Derive population flags ----
   left_join(dm_flags, by = "USUBJID") |>
   mutate(across(names(dm_flags), ~ coalesce(.x, "N"))) |>
@@ -154,6 +158,7 @@ adsl_1 <- adsl_0 |>
                         DCDECOD == "LOST TO FOLLOW-UP" ~ "Lost to Follow-up",
                         DCDECOD == "LACK OF EFFICACY" ~ "Lack of Efficacy",
                         DCDECOD == "STUDY TERMINATED BY SPONSOR" ~ "Sponsor Decision",
+                        DCDECOD == "COMPLETED" ~ NA_character_,
                         TRUE ~ str_to_title(DCDECOD)),
     DISCONFL = if_else(DCDECOD == "COMPLETED", NA_character_, "Y"),
     DSRAEFL = if_else(DCDECOD == "ADVERSE EVENT", "Y", NA_character_),
@@ -200,7 +205,9 @@ adsl_1 <- adsl_0 |>
                             new_var = CUMDOSE,
                             analysis_var = EXDOSE,
                             summary_fun = sum) |>
-  mutate(AVGDD = CUMDOSE/TRTDURD)
+  mutate(AVGDD = CUMDOSE/TRTDURD) |>
+  ### Round variables etc. ----
+  mutate(across(c(AVGDD, CUMDOSE, DURDIS, BMIBL, HEIGHTBL, WEIGHTBL), ~ round(.x, 1)))
 
 ## Check progress ----
 
