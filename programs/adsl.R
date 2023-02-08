@@ -4,6 +4,10 @@ library(metatools)
 library(xportr)
 library(tidyverse)
 
+if (interactive()){
+  options("xportr.type_verbose" = "warn")
+}
+
 # Read and prepare metadata ----
 
 specs <- read_all_sheets("metadata/specs.xlsx")
@@ -100,7 +104,7 @@ adsl_1 <- adsl_0 |>
   mutate(
     TRT01A = TRT01P,
     TRT01AN = TRT01PN,
-    SITEGR1 = "900",
+    SITEGR1 = str_sub(string = USUBJID, start = 4, end = 6),
     AGEGR1N = case_when(AGE < 65 ~ 1,
                         AGE > 80 ~ 3,
                         TRUE ~ 2),
@@ -130,7 +134,8 @@ adsl_1 <- adsl_0 |>
     BMIBL = WEIGHTBL / (HEIGHTBL/100)**2,
     BMIBLGR1 = case_when(BMIBL < 25 ~ "<25",
                          BMIBL >= 30 ~ ">=30",
-                         !is.na(BMIBL) ~ "25-<30")
+                         !is.na(BMIBL) ~ "25-<30"),
+    across(ends_with("BL"), ~ round(.x, 1))
     ) |>
   ### Derive population flags ----
   left_join(dm_flags, by = "USUBJID") |>
@@ -176,11 +181,12 @@ adsl_1 <- adsl_0 |>
   mutate(across(c(VISIT1DT, TRTSDT, DISONSDT, TRTEDT), convert_dtc_to_dt)) |>
   derive_vars_duration(new_var = TRTDURD, start_date = TRTSDT, end_date = TRTEDT) |>
   derive_vars_duration(new_var = DURDIS,
-                       start_date = VISIT1DT,
-                       end_date = DISONSDT,
+                       start_date = DISONSDT,
+                       end_date = VISIT1DT,
                        out_unit = "months") |>
   mutate(DURDSGR1 = case_when(DURDIS >= 12 ~ ">=12",
-                              !is.na(DURDIS) ~ "<12")) |>
+                              !is.na(DURDIS) ~ "<12"),
+         DURDIS = round(DURDIS,1)) |>
   ### Summary stats from SDTM ----
   derive_var_merged_summary(dataset_add = sdtm$qs,
                             by_vars = vars(USUBJID),
